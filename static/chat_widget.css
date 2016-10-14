@@ -1,0 +1,9 @@
+.chat_cont {
+    position:relative;
+}
+
+.chat_cont2 {
+    position:absolute;
+    bottom:0;
+    right:0;
+}

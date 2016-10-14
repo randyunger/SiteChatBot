@@ -21,62 +21,70 @@ slack_token = os.environ.get('SLACK_BOT_TOKEN')
 slack_client = SlackClient(slack_token)
 connected = slack_client.rtm_connect()
 
-def handle_command(msg, channel):
-    # response = "pong"
-    # slack_client.api_call("chat.postMessage", channel = channel, text=response, as_user=True)
-    # emit('to_visitor',
-    #     {'data': msg, 'count': 0})
-    print("Sending to visitor: " + msg)
-    socketio.emit('to_visitor',
-                  {'data': msg},
-                  namespace='/chat')
+# def handle_command(msg, channel):
+#     # response = "pong"
+#     # slack_client.api_call("chat.postMessage", channel = channel, text=response, as_user=True)
+#     # emit('to_visitor',
+#     #     {'data': msg, 'count': 0})
+#     print("Sending to visitor: " + msg)
+#     socketio.emit('to_visitor',
+#                   {'data': msg},
+#                   namespace='/chat')
 
-# def extract_message(json_msg):
-#     if json_msg and len(json_msg) > 0:
-#         for line in json_msg:
-#             print(line)
-#             if line and 'message' in line:
-#                 message = line['message']
+def extract_message(json_msg):
+    AT_BOT = "<@" + BOT_ID + ">"
+    if json_msg and len(json_msg) > 0:
+        for line in json_msg:
+            print(line)
+            if line and 'message' in line:
+                message = line['message']
+                if 'text' in message:
+                    text = message['text']
+                    print("--A text message!--" + text)
+                    out = text, line.get('channel', None), line.get('type', None)
+                    return out
+            elif line and 'text' in line:
+                text = line['text']
+                print("--A text message!--" + text)
+                out = text, line.get('channel', None), line.get('type', None)
+                return out
+    return None, None, None
+
+def handle_slack_line(jSlack):
+    message, channel, type = extract_message(jSlack)
+    # slack_client.api_call()
+    if type == "message":
+        print("Sending to visitor: " + message)
+        socketio.emit('to_visitor',
+                      {'data': message},
+                      namespace='/chat')
+
+
+
+# def parse_slack_output(slack_rtm_output):
+#     AT_BOT = "<@" + BOT_ID + ">"
+#     output_list = slack_rtm_output
+#     if output_list and len(output_list) > 0:
+#         for output in output_list:
+#             print(output)
+#             if output and 'message' in output:
+#                 message = output['message']
 #                 if 'text' in message:
 #                     text = message['text']
 #                     print("--A text message!--" + text)
 #                     if AT_BOT in text:
 #                         print("--A message for me!--")
-#                         out = text.split(AT_BOT)[1].strip().lower(), line['channel']
+#                         out = text.split(AT_BOT)[1].strip().lower(), output['channel']
 #                         return out
-#             if line and 'text' in line:
-#                 text = line['text']
+#             if output and 'text' in output:
+#                 text = output['text']
 #                 print("--A text message!--" + text)
 #                 if AT_BOT in text:
 #                     print("--A message for me!--")
-#                     out = text.split(AT_BOT)[1].strip().lower(), line['channel']
+#                     out = text.split(AT_BOT)[1].strip().lower(), output['channel']
 #                     return out
+#     return None, None
 #
-
-def parse_slack_output(slack_rtm_output):
-    AT_BOT = "<@" + BOT_ID + ">"
-    output_list = slack_rtm_output
-    if output_list and len(output_list) > 0:
-        for output in output_list:
-            print(output)
-            if output and 'message' in output:
-                message = output['message']
-                if 'text' in message:
-                    text = message['text']
-                    print("--A text message!--" + text)
-                    if AT_BOT in text:
-                        print("--A message for me!--")
-                        out = text.split(AT_BOT)[1].strip().lower(), output['channel']
-                        return out
-            if output and 'text' in output:
-                text = output['text']
-                print("--A text message!--" + text)
-                if AT_BOT in text:
-                    print("--A message for me!--")
-                    out = text.split(AT_BOT)[1].strip().lower(), output['channel']
-                    return out
-    return None, None
-
 
 def background_thread():
     print("In bg thread")
@@ -88,26 +96,11 @@ def background_thread():
         while True:
             slack_line = slack_client.rtm_read()
             if slack_line:
-                to_host_msg, channel = parse_slack_output(slack_line)
-                if to_host_msg and channel:
-                    handle_command(to_host_msg, channel)
-                else:
-                    print("--No message to relay--")
+                handle_slack_line(slack_line)
 
             socketio.sleep(READ_WEBSOCKET_DELAY)
     else:
         print("connection failed")
-    # """Aomwthing """
-    # count = 0
-    # while True:
-    #     socketio.sleep(3)
-    #     print("BG sleep done")
-    #     count += 1
-    #     socketio.emit('to_visitor',
-    #                   {'data': 'Server generated event', 'count': count},
-    #                   namespace='/chat')
-
-
 
 @app.route('/')
 def index():
