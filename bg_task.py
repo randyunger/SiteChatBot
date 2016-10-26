@@ -18,21 +18,33 @@ thread = None
 
 BOT_ID = os.environ.get("BOT_ID")
 slack_token = os.environ.get('SLACK_BOT_TOKEN')
-slack_client = SlackClient(slack_token)
-connected = slack_client.rtm_connect()
+recent_msgs = []
 
-# def handle_command(msg, channel):
-#     # response = "pong"
-#     # slack_client.api_call("chat.postMessage", channel = channel, text=response, as_user=True)
-#     # emit('to_visitor',
-#     #     {'data': msg, 'count': 0})
-#     print("Sending to visitor: " + msg)
-#     socketio.emit('to_visitor',
-#                   {'data': msg},
-#                   namespace='/chat')
+
+def mk_slack_client():
+    global slack_client
+    slack_client = SlackClient(slack_token)
+    slack_client.rtm_connect()
+    return slack_client
+
+slack_client = mk_slack_client()
+
+
+class ServerState:
+    def __init__(self):
+        self.user_count = 0
+
+    def inc(self):
+        self.user_count += 1
+
+    def dec(self):
+        self.user_count -= 1
+
+srvr_state = ServerState()
+
 
 def extract_message(json_msg):
-    AT_BOT = "<@" + BOT_ID + ">"
+    # AT_BOT = "<@" + BOT_ID + ">"
     if json_msg and len(json_msg) > 0:
         for line in json_msg:
             print(line)
@@ -50,6 +62,7 @@ def extract_message(json_msg):
                 return out
     return None, None, None
 
+
 def handle_slack_line(jSlack):
     message, channel, type = extract_message(jSlack)
     # slack_client.api_call()
@@ -60,47 +73,24 @@ def handle_slack_line(jSlack):
                       namespace='/chat')
 
 
+READ_WEBSOCKET_DELAY = 1  # 1 sec delay
 
-# def parse_slack_output(slack_rtm_output):
-#     AT_BOT = "<@" + BOT_ID + ">"
-#     output_list = slack_rtm_output
-#     if output_list and len(output_list) > 0:
-#         for output in output_list:
-#             print(output)
-#             if output and 'message' in output:
-#                 message = output['message']
-#                 if 'text' in message:
-#                     text = message['text']
-#                     print("--A text message!--" + text)
-#                     if AT_BOT in text:
-#                         print("--A message for me!--")
-#                         out = text.split(AT_BOT)[1].strip().lower(), output['channel']
-#                         return out
-#             if output and 'text' in output:
-#                 text = output['text']
-#                 print("--A text message!--" + text)
-#                 if AT_BOT in text:
-#                     print("--A message for me!--")
-#                     out = text.split(AT_BOT)[1].strip().lower(), output['channel']
-#                     return out
-#     return None, None
-#
 
 def background_thread():
     print("In bg thread")
     """Example of how to send server generated events to clients."""
-    READ_WEBSOCKET_DELAY = 1  # 1 sec delay
-    if connected:
-        print("--connected!--")
-        print("--listening for " + BOT_ID + "--")
-        while True:
+    print("--listening for " + BOT_ID + "--")
+    global slack_client
+    while True:
+        try:
             slack_line = slack_client.rtm_read()
+            slack_client.rtm_connect()
             if slack_line:
                 handle_slack_line(slack_line)
+        except ConnectionResetError:
+            slack_client = mk_slack_client()
+        socketio.sleep(READ_WEBSOCKET_DELAY)
 
-            socketio.sleep(READ_WEBSOCKET_DELAY)
-    else:
-        print("connection failed")
 
 @app.route('/')
 def index():
@@ -108,10 +98,11 @@ def index():
 
 
 class MyNamespace(Namespace):
+
     def on_to_host(self, message):
         msg_content = message['data']
         print("Visitor sent message: " + msg_content)
-        slack_client.rtm_send_message("general", msg_content)
+        slack_client.rtm_send_message("web_visitors", msg_content)
         # emit('to_visitor',
         #      {'data': message['data'], 'count': 0})
 
@@ -158,13 +149,21 @@ class MyNamespace(Namespace):
     #     emit('my_pong')
     #
     def on_connect(self):
+        srvr_state.inc()
+        print("User joined: Count: " + srvr_state.user_count.__str__())
+        if srvr_state.user_count > 1:
+            count_msg = "There's a new visitor on the site (" + srvr_state.user_count.__str__() + ")"
+            print("Sending new visitor msg: " + count_msg)
+            slack_client.rtm_send_message("web_visitors", count_msg)
         global thread
         if thread is None:
             thread = socketio.start_background_task(target=background_thread)
-        # emit('my_response', {'data': 'Connected', 'count': 0})
-    #
-    # def on_disconnect(self):
-    #     print('Client disconnected', request.sid)
+        # emit('to_host', {'data': 'Connected', 'count': 0})
+
+    def on_disconnect(self):
+        srvr_state.dec()
+        print("User left. Count: " + srvr_state.user_count.__str__())
+        print('Client disconnected', request.sid)
 
 
 socketio.on_namespace(MyNamespace('/chat'))
