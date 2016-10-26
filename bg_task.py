@@ -18,7 +18,8 @@ thread = None
 
 BOT_ID = os.environ.get("BOT_ID")
 slack_token = os.environ.get('SLACK_BOT_TOKEN')
-recent_msgs = []
+recent_msgs = set()
+RECENT_MSGS_MAX_LEN = 50
 
 
 def mk_slack_client():
@@ -42,24 +43,44 @@ class ServerState:
 
 srvr_state = ServerState()
 
+def extract_tokens(line):
+    "Just extract the tokens, regardless of structure"
+    if line and 'message' in line:
+        message = line['message']
+        if 'text' in message:
+            text = message['text']
+            print("--A text message!--" + text)
+            channel = line.get('channel', None)
+            typ = line.get('type', None)
+            ts = line.get('ts', None)
+            return text, channel, typ, ts
+    elif line and 'text' in line:
+        text = line['text']
+        print("--A text message!--" + text)
+        channel = line.get('channel', None)
+        typ = line.get('type', None)
+        ts = line.get('ts', None)
+        return text, channel, typ, ts
+
 
 def extract_message(json_msg):
+    """Couldn't I wrap up a bunch of the state and functionality here into a class,
+     so I wouldn't have use globals?"""
     # AT_BOT = "<@" + BOT_ID + ">"
     if json_msg and len(json_msg) > 0:
         for line in json_msg:
+            line_str = line.__str__()
             print(line)
-            if line and 'message' in line:
-                message = line['message']
-                if 'text' in message:
-                    text = message['text']
-                    print("--A text message!--" + text)
-                    out = text, line.get('channel', None), line.get('type', None)
-                    return out
-            elif line and 'text' in line:
-                text = line['text']
-                print("--A text message!--" + text)
-                out = text, line.get('channel', None), line.get('type', None)
-                return out
+            global recent_msgs
+            if not recent_msgs.__contains__(line_str):
+                text, channel, typ, ts = extract_tokens(line)
+                recent_msgs.add(line_str)
+                "Truncate recent msgs if necessary"
+                if recent_msgs.__len__() > RECENT_MSGS_MAX_LEN:
+                    ix = RECENT_MSGS_MAX_LEN - recent_msgs.__len__()
+                    new_recent_msgs = recent_msgs[ix:]
+                    recent_msgs = new_recent_msgs
+                return text, channel, typ
     return None, None, None
 
 
@@ -81,10 +102,12 @@ def background_thread():
     """Example of how to send server generated events to clients."""
     print("--listening for " + BOT_ID + "--")
     global slack_client
+    slack_client.rtm_connect()
+    print("--slack client connected--")
     while True:
         try:
             slack_line = slack_client.rtm_read()
-            slack_client.rtm_connect()
+            # slack_client.rtm_connect()
             if slack_line:
                 handle_slack_line(slack_line)
         except ConnectionResetError:
